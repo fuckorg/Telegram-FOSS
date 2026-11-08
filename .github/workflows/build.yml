@@ -30,7 +30,7 @@ jobs:
             "ndk;21.4.7075529" "cmake;3.10.2.4988404"
 
       - name: Apply mod patches
-        run: python3 .github/mod/apply_mod.py
+        run: python3 .github/.github/mod/apply_mod.py
 
       - name: Write API keys
         env:
