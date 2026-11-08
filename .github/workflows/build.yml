@@ -1,0 +1,79 @@
+name: Build OrganicGram APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 11
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Install Android SDK parts and ninja
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build yasm nasm
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-33" "build-tools;33.0.0" \
+            "ndk;21.4.7075529" "cmake;3.10.2.4988404"
+
+      - name: Apply mod patches
+        run: python3 .github/mod/apply_mod.py
+
+      - name: Write API keys
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          test -n "$TG_API_ID" && test -n "$TG_API_HASH" || { echo "Add TG_API_ID and TG_API_HASH secrets"; exit 1; }
+          printf 'APP_ID = %s\nAPP_HASH = %s\n' "$TG_API_ID" "$TG_API_HASH" > API_KEYS
+          cp API_KEYS TMessagesProj/API_KEYS
+
+      - name: Build native dependencies
+        working-directory: TMessagesProj/jni
+        run: |
+          export NDK=$ANDROID_HOME/ndk/21.4.7075529
+          export NINJA_PATH=$(which ninja)
+          ./build_libvpx_clang.sh
+          ./build_ffmpeg_clang.sh
+          ./patch_ffmpeg.sh
+          ./patch_boringssl.sh
+          ./build_boringssl.sh
+
+      - name: Build APK
+        run: |
+          export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/21.4.7075529
+          chmod +x gradlew
+          ./gradlew :TMessagesProj_App:assembleAfatRelease --no-daemon --stacktrace
+
+      - name: Sign APK
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > my.jks
+          else
+            keytool -genkeypair -keystore my.jks -alias organicgram -keyalg RSA -keysize 2048 \
+              -validity 10000 -storepass organicgram123 -keypass organicgram123 -dname "CN=OrganicGram"
+          fi
+          APK=$(find TMessagesProj_App/build/outputs/apk -name "app.apk" | head -1)
+          $ANDROID_HOME/build-tools/33.0.0/apksigner sign --ks my.jks \
+            --ks-pass pass:organicgram123 --key-pass pass:organicgram123 \
+            --out OrganicGram.apk "$APK"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OrganicGram-apk
+          path: OrganicGram.apk
