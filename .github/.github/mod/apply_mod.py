@@ -63,4 +63,7 @@ patch("TMessagesProj_App/build.gradle",
 patch("TMessagesProj_App/build.gradle",
       r'abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"', 'abiFilters "arm64-v8a"',
       count=10, regex=True)
+# 6. Native account limit must match Java
+patch("TMessagesProj/jni/tgnet/Defines.h",
+      "#define MAX_ACCOUNT_COUNT 5", "#define MAX_ACCOUNT_COUNT 16")
 print("ALL PATCHES OK")
